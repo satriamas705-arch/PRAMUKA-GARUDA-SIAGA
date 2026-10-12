@@ -30,6 +30,7 @@ export interface SyncPayload {
   meta?: {
     isFullAdminSync?: boolean;
     note?: string;
+    targetFolderId?: string;
   };
 }
 
@@ -41,6 +42,15 @@ export interface DriveFileInfo {
   size?: string;
   description?: string;
   webViewLink?: string;
+}
+
+export interface FolderAccessStatus {
+  checked: boolean;
+  accessible: boolean;
+  canWrite: boolean;
+  name?: string;
+  error?: string;
+  isSharedDrive?: boolean;
 }
 
 export interface SyncMergeReport {
@@ -68,77 +78,160 @@ export interface SyncMergeReport {
   };
   remoteLastUpdated?: string;
   remoteUpdatedBy?: string;
+  storageLocation?: string;
 }
 
 /**
- * Check if the user has access to the target Google Drive folder
+ * Check if user has access to target Google Drive folder
+ * Uses supportsAllDrives=true to ensure Shared Drives & shared links work
  */
-export async function verifyFolderAccess(accessToken: string): Promise<{
-  accessible: boolean;
-  name?: string;
-  error?: string;
-}> {
+export async function verifyFolderAccess(
+  accessToken: string,
+  folderId: string = GOOGLE_DRIVE_FOLDER_ID
+): Promise<FolderAccessStatus> {
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${GOOGLE_DRIVE_FOLDER_ID}?fields=id,name,capabilities,webViewLink`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
+    const url = `https://www.googleapis.com/drive/v3/files/${folderId}?supportsAllDrives=true&fields=id,name,capabilities,webViewLink,driveId,shared`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
 
     if (res.status === 404) {
       return {
+        checked: true,
         accessible: false,
+        canWrite: false,
         error:
-          'Folder Google Drive tidak ditemukan atau belum dibagikan ke akun Google Anda.',
+          'Folder tidak ditemukan atau belum dibagikan ke akun Google ini. Pastikan Anda telah membuka tautan folder di browser dengan akun tersebut setidaknya satu kali.',
       };
     }
 
     if (res.status === 403) {
       return {
+        checked: true,
         accessible: false,
+        canWrite: false,
         error:
-          'Akses ditolak ke folder Google Drive. Pastikan akun Google Anda telah diberikan izin akses.',
+          'Akses folder ditolak oleh Google. Pastikan akun Google Anda telah diberikan izin akses.',
       };
     }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       return {
+        checked: true,
         accessible: false,
+        canWrite: false,
         error: err.error?.message || `Gagal mengakses folder (Status: ${res.status})`,
       };
     }
 
     const data = await res.json();
+    const canWrite =
+      data.capabilities?.canAddChildren === true ||
+      data.capabilities?.canEdit === true;
+
     return {
+      checked: true,
       accessible: true,
+      canWrite,
       name: data.name || 'Folder Penilaian Pramuka Garuda',
+      isSharedDrive: !!data.driveId,
     };
   } catch (e: any) {
     return {
+      checked: true,
       accessible: false,
-      error: e.message || 'Koneksi jaringan ke Google Drive terputus.',
+      canWrite: false,
+      error: e.message || 'Koneksi ke Google Drive terputus.',
     };
   }
 }
 
 /**
- * List files in the target folder
+ * List files in the target folder with supportsAllDrives
  */
 export async function listFolderFiles(
+  accessToken: string,
+  folderId: string = GOOGLE_DRIVE_FOLDER_ID
+): Promise<DriveFileInfo[]> {
+  try {
+    const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+    const fields = encodeURIComponent(
+      'files(id, name, mimeType, modifiedTime, size, description, webViewLink)'
+    );
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=modifiedTime desc&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn('Folder file query error:', err);
+      // Fallback search by name if parent query is not permitted
+      return await searchMasterFilesByName(accessToken);
+    }
+
+    const data = await res.json();
+    return data.files || [];
+  } catch (e) {
+    console.warn('listFolderFiles failed, trying fallback search:', e);
+    return await searchMasterFilesByName(accessToken);
+  }
+}
+
+/**
+ * Fallback: Search for master sync or backup files accessible by this user
+ */
+async function searchMasterFilesByName(
   accessToken: string
 ): Promise<DriveFileInfo[]> {
-  const query = encodeURIComponent(
-    `'${GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false`
-  );
-  const fields = encodeURIComponent(
-    'files(id, name, mimeType, modifiedTime, size, description, webViewLink)'
-  );
-  const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=modifiedTime desc&pageSize=50`;
+  try {
+    const query = encodeURIComponent(
+      `name contains 'pramuka_garuda' and trashed = false`
+    );
+    const fields = encodeURIComponent(
+      'files(id, name, mimeType, modifiedTime, size, description, webViewLink)'
+    );
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=modifiedTime desc&pageSize=30&supportsAllDrives=true&includeItemsFromAllDrives=true`;
 
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.files || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+/**
+ * Find the primary master sync file
+ */
+export async function findMasterSyncFile(
+  accessToken: string,
+  folderId: string = GOOGLE_DRIVE_FOLDER_ID
+): Promise<DriveFileInfo | null> {
+  const files = await listFolderFiles(accessToken, folderId);
+  const master = files.find((f) => f.name === MASTER_SYNC_FILENAME);
+  if (master) return master;
+
+  // Fallback: Check if there's any master sync file accessible in Drive
+  const fallbackFiles = await searchMasterFilesByName(accessToken);
+  return fallbackFiles.find((f) => f.name === MASTER_SYNC_FILENAME) || null;
+}
+
+/**
+ * Download JSON file content from Drive
+ */
+export async function downloadJsonFile<T = any>(
+  accessToken: string,
+  fileId: string
+): Promise<T> {
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -146,100 +239,117 @@ export async function listFolderFiles(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
-      err.error?.message || `Gagal membaca isi folder Google Drive (${res.status})`
+      err.error?.message || `Gagal mengunduh file dari Google Drive (${res.status})`
     );
-  }
-
-  const data = await res.json();
-  return data.files || [];
-}
-
-/**
- * Find the primary master sync file in the folder
- */
-export async function findMasterSyncFile(
-  accessToken: string
-): Promise<DriveFileInfo | null> {
-  const files = await listFolderFiles(accessToken);
-  const master = files.find((f) => f.name === MASTER_SYNC_FILENAME);
-  return master || null;
-}
-
-/**
- * Download and parse a JSON file from Drive
- */
-export async function downloadJsonFile<T = any>(
-  accessToken: string,
-  fileId: string
-): Promise<T> {
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }
-  );
-
-  if (!res.ok) {
-    throw new Error(`Gagal mengunduh file dari Google Drive (${res.status})`);
   }
 
   return await res.json();
 }
 
 /**
- * Upload a new file to the Google Drive folder via multipart upload
+ * Upload a JSON file to Google Drive.
+ * If target folder is write-restricted, gracefully falls back to user's root Drive with metadata.
  */
 export async function uploadJsonToDrive(
   accessToken: string,
   fileName: string,
   payload: any,
-  description?: string
-): Promise<DriveFileInfo> {
-  const metadata = {
-    name: fileName,
-    mimeType: 'application/json',
-    parents: [GOOGLE_DRIVE_FOLDER_ID],
-    description: description || 'Data Sinkronisasi Pramuka Garuda Banyumas',
-  };
-
+  description?: string,
+  folderId: string = GOOGLE_DRIVE_FOLDER_ID
+): Promise<{ file: DriveFileInfo; usedFallback: boolean }> {
   const fileContent = JSON.stringify(payload, null, 2);
   const boundary = '-------314159265358979323846';
   const delimiter = `\r\n--${boundary}\r\n`;
   const closeDelim = `\r\n--${boundary}--`;
 
-  const multipartRequestBody =
+  // First attempt: Upload directly to designated target folder
+  try {
+    const metadataWithParent = {
+      name: fileName,
+      mimeType: 'application/json',
+      parents: [folderId],
+      description: description || 'Data Penilaian Pramuka Garuda Banyumas',
+    };
+
+    const multipartBody =
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(metadataWithParent) +
+      delimiter +
+      'Content-Type: application/json\r\n\r\n' +
+      fileContent +
+      closeDelim;
+
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,modifiedTime,size,description,webViewLink',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body: multipartBody,
+      }
+    );
+
+    if (res.ok) {
+      const created = await res.json();
+      return { file: created, usedFallback: false };
+    }
+
+    const err = await res.json().catch(() => ({}));
+    console.warn('Upload to parent folder failed with status', res.status, err);
+
+    // If error is permission or not found, try fallback
+    if (res.status !== 403 && res.status !== 404) {
+      throw new Error(err.error?.message || `Gagal unggah file (${res.status})`);
+    }
+  } catch (err: any) {
+    console.warn('Initial folder upload threw, proceeding to fallback:', err);
+  }
+
+  // Fallback attempt: Upload to user's personal Google Drive root
+  const fallbackMetadata = {
+    name: fileName,
+    mimeType: 'application/json',
+    description: `[Pramuka Garuda] ${description || 'Cadangan Data'} (Disimpan di Google Drive Utama)`,
+  };
+
+  const fallbackBody =
     delimiter +
     'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-    JSON.stringify(metadata) +
+    JSON.stringify(fallbackMetadata) +
     delimiter +
     'Content-Type: application/json\r\n\r\n' +
     fileContent +
     closeDelim;
 
-  const res = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,description,webViewLink',
+  const fallbackRes = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,modifiedTime,size,description,webViewLink',
     {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': `multipart/related; boundary=${boundary}`,
       },
-      body: multipartRequestBody,
+      body: fallbackBody,
     }
   );
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
+  if (!fallbackRes.ok) {
+    const err = await fallbackRes.json().catch(() => ({}));
     throw new Error(
-      err.error?.message || `Gagal mengunggah data ke Google Drive (${res.status})`
+      err.error?.message ||
+        `Gagal mengunggah ke Google Drive (Status: ${fallbackRes.status})`
     );
   }
 
-  return await res.json();
+  const fallbackCreated = await fallbackRes.json();
+  return { file: fallbackCreated, usedFallback: true };
 }
 
 /**
- * Update an existing JSON file in Google Drive
+ * Update existing JSON file content in Google Drive
  */
 export async function updateJsonInDrive(
   accessToken: string,
@@ -249,9 +359,8 @@ export async function updateJsonInDrive(
 ): Promise<DriveFileInfo> {
   const fileContent = JSON.stringify(payload, null, 2);
 
-  // Update content
   const res = await fetch(
-    `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+    `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`,
     {
       method: 'PATCH',
       headers: {
@@ -265,34 +374,37 @@ export async function updateJsonInDrive(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
-      err.error?.message || `Gagal memperbarui file di Google Drive (${res.status})`
+      err.error?.message ||
+        `Gagal memperbarui file di Google Drive (Status: ${res.status})`
     );
   }
 
-  // Update description/metadata if provided
   if (description) {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ description }),
-    }).catch(() => {});
+    await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description }),
+      }
+    ).catch(() => {});
   }
 
   return await res.json();
 }
 
 /**
- * Delete a file in Google Drive (Destructive: requires user confirmation per policy)
+ * Delete a file in Drive
  */
 export async function deleteDriveFile(
   accessToken: string,
   fileId: string
 ): Promise<void> {
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -302,24 +414,19 @@ export async function deleteDriveFile(
   if (!res.ok && res.status !== 404) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
-      err.error?.message || `Gagal menghapus file dari Google Drive (${res.status})`
+      err.error?.message || `Gagal menghapus file di Drive (${res.status})`
     );
   }
 }
 
 // ========================================================
-// SMART MERGE & UPDATE LOGIC (Tidak menghapus data lama)
+// SMART MERGE & UPDATE ALGORITHM (Data lama tidak terhapus)
 // ========================================================
 
 function normalizeKey(str: string): string {
   return (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/**
- * Performs a two-way Merge and Update between local data and remote cloud data.
- * Guarantees no existing participants, examiners, teams, or grades are deleted.
- * Newer or more detailed fields overwrite older blanks.
- */
 export function mergeAndUpdateAppData(
   local: {
     peserta: Peserta[];
@@ -345,7 +452,6 @@ export function mergeAndUpdateAppData(
   let penilaianUpdated = 0;
 
   if (!remote) {
-    // No remote data yet: return local packaged as new master payload
     const initialPayload: SyncPayload = {
       version: 1,
       appName: 'Penilaian Pramuka Garuda Kemranjen-Siaga',
@@ -386,7 +492,6 @@ export function mergeAndUpdateAppData(
   // --- 1. PESERTA MERGE ---
   const mergedPesertaMap = new Map<string, Peserta>();
 
-  // Helper key to identify duplicate peserta across sources
   const getPesertaKey = (p: Peserta) => {
     const no = normalizeKey(p.nomorPeserta);
     if (no) return `no:${no}`;
@@ -395,21 +500,18 @@ export function mergeAndUpdateAppData(
     return `name:${name}_${pang}`;
   };
 
-  // Add all remote first
   (remote.peserta || []).forEach((remP) => {
     mergedPesertaMap.set(getPesertaKey(remP), remP);
   });
 
-  // Merge or add local
   local.peserta.forEach((locP) => {
     const key = getPesertaKey(locP);
     if (mergedPesertaMap.has(key)) {
       const remP = mergedPesertaMap.get(key)!;
-      // Merge properties: choose richer/latest data
       const merged: Peserta = {
         id: locP.id || remP.id,
         nomorPeserta: locP.nomorPeserta || remP.nomorPeserta,
-        nama: locP.nama.length >= remP.nama.length ? locP.nama : remP.nama,
+        nama: locP.nama.length >= (remP.nama || '').length ? locP.nama : remP.nama,
         jenisKelamin: locP.jenisKelamin || remP.jenisKelamin,
         pangkalan: locP.pangkalan || remP.pangkalan,
         gudep: locP.gudep || remP.gudep,
@@ -474,7 +576,6 @@ export function mergeAndUpdateAppData(
     const key = getKelompokKey(locK);
     if (mergedKelompokMap.has(key)) {
       const remK = mergedKelompokMap.get(key)!;
-      // Merge lists
       const mergedPengujiIds = Array.from(
         new Set([...(locK.pengujiIds || []), ...(remK.pengujiIds || [])])
       );
@@ -504,29 +605,10 @@ export function mergeAndUpdateAppData(
   const mergedKelompok = Array.from(mergedKelompokMap.values());
 
   // --- 4. PENILAIAN MERGE ---
-  // Penilaian is keyed by pesertaId. But we also cross-map by nomorPeserta to ensure matching
   const mergedPenilaian: Record<string, PenilaianPeserta> = {};
   const remotePenilaian = remote.penilaian || {};
   const localPenilaian = local.penilaian || {};
 
-  // Build mapping from remote peserta id to matched merged peserta id
-  const pesertaIdMap = new Map<string, string>(); // oldId -> canonicalId
-  (remote.peserta || []).forEach((remP) => {
-    const key = getPesertaKey(remP);
-    const matched = mergedPesertaMap.get(key);
-    if (matched) {
-      pesertaIdMap.set(remP.id, matched.id);
-    }
-  });
-  local.peserta.forEach((locP) => {
-    const key = getPesertaKey(locP);
-    const matched = mergedPesertaMap.get(key);
-    if (matched) {
-      pesertaIdMap.set(locP.id, matched.id);
-    }
-  });
-
-  // Calculate score helper
   const calculateTotalScore = (pen?: PenilaianPeserta) => {
     if (!pen) return -1;
     const adminCount = (pen.administrasi || []).filter((a) => a.tersedia).length;
@@ -537,26 +619,29 @@ export function mergeAndUpdateAppData(
     return adminCount + wawancaraScore;
   };
 
-  // Process all canonical peserta IDs
   mergedPeserta.forEach((p) => {
     const canonicalId = p.id;
-
-    // Find in local
     let locPen = localPenilaian[canonicalId];
     if (!locPen) {
-      // Try finding by original local participant id
-      const originalLocal = local.peserta.find(
+      const origLocal = local.peserta.find(
         (lp) => getPesertaKey(lp) === getPesertaKey(p)
       );
-      if (originalLocal) locPen = localPenilaian[originalLocal.id];
+      if (origLocal) locPen = localPenilaian[origLocal.id];
     }
 
-    // Find in remote
     let remPen: PenilaianPeserta | undefined = undefined;
     for (const [rId, rVal] of Object.entries(remotePenilaian)) {
-      if (rId === canonicalId || pesertaIdMap.get(rId) === canonicalId) {
+      if (rId === canonicalId) {
         remPen = rVal;
         break;
+      }
+    }
+    if (!remPen) {
+      const origRemote = (remote.peserta || []).find(
+        (rp) => getPesertaKey(rp) === getPesertaKey(p)
+      );
+      if (origRemote && remotePenilaian[origRemote.id]) {
+        remPen = remotePenilaian[origRemote.id];
       }
     }
 
@@ -572,7 +657,6 @@ export function mergeAndUpdateAppData(
       const locTime = new Date(locPen.updatedAt || 0).getTime();
       const remTime = new Date(remPen.updatedAt || 0).getTime();
 
-      // If one is filled and other is 0 / empty, prefer the filled one
       if (locScore > 0 && remScore === 0) {
         mergedPenilaian[canonicalId] = { ...locPen, pesertaId: canonicalId };
       } else if (remScore > 0 && locScore === 0) {
@@ -587,7 +671,6 @@ export function mergeAndUpdateAppData(
   });
 
   // --- 5. SETTINGS MERGE ---
-  // Prefer local settings if customized, otherwise fallback to remote
   const mergedSettings: AppSettings = {
     ...remote.settings,
     ...local.settings,
@@ -648,10 +731,8 @@ export function mergeAndUpdateAppData(
 }
 
 /**
- * ADMIN DELETION SYNC (Khusus Admin)
- * Synchronizes deletions made by the admin so Google Drive matches the admin's current local state.
- * Any participant, examiner, team, or grade that was permanently removed locally by the admin
- * is also removed in the master file on Google Drive.
+ * ADMIN DELETION SYNC
+ * Syncs deletions made by admin so Google Drive accurately mirrors the admin state.
  */
 export function buildAdminDeletionSyncPayload(
   local: {
@@ -668,11 +749,9 @@ export function buildAdminDeletionSyncPayload(
   payload: SyncPayload;
   report: SyncMergeReport;
 } {
-  // Take local data directly as the authoritative state
   const cleanPenilaian: Record<string, PenilaianPeserta> = {};
   const validPesertaIds = new Set(local.peserta.map((p) => p.id));
 
-  // Only retain penilaian for existing local participants
   Object.entries(local.penilaian).forEach(([pId, val]) => {
     if (validPesertaIds.has(pId)) {
       cleanPenilaian[pId] = val;
