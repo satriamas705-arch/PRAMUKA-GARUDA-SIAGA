@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   ChevronRight,
   ExternalLink,
+  Cloud,
 } from 'lucide-react';
 import { PramukaBadge } from './PramukaBadge';
 import { AppSettings, AuthUser } from '../types';
@@ -93,6 +94,7 @@ interface SidebarProps {
   sudahDinilaiCount: number;
   currentUser?: AuthUser | null;
   onOpenSettings?: () => void;
+  onOpenDriveSync?: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -105,6 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   sudahDinilaiCount,
   currentUser,
   onOpenSettings,
+  onOpenDriveSync,
   mobileOpen,
   onCloseMobile,
 }) => {
@@ -243,9 +246,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
 
+        {/* Google Drive Cloud Sync button for all users */}
+        {onOpenDriveSync && (
+          <div className="pt-3 mt-3 border-t border-stone-800">
+            <div className="px-3 pb-2 text-[10px] font-bold text-stone-400 uppercase tracking-widest">
+              Cloud &amp; Sinkronisasi
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onOpenDriveSync();
+                onCloseMobile();
+              }}
+              className="w-full px-3.5 py-2.5 rounded-xl text-left font-semibold text-xs sm:text-sm flex items-center justify-between text-amber-300 bg-amber-950/40 border border-amber-800/60 hover:bg-amber-900/50 transition-colors group cursor-pointer"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-1.5 rounded-lg bg-amber-800/80 text-amber-200 group-hover:scale-105 transition-transform shrink-0">
+                  <Cloud className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="leading-tight font-bold text-white truncate">
+                    Sinkronisasi Drive
+                  </div>
+                  <div className="text-[10px] text-amber-300/80 font-normal truncate">
+                    Merge &amp; Backup Cloud
+                  </div>
+                </div>
+              </div>
+              <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Drive
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Settings button in sidebar for admin */}
         {!isPenguji && onOpenSettings && (
-          <div className="pt-3 mt-3 border-t border-stone-800">
+          <div className="pt-2">
             <div className="px-3 pb-2 text-[10px] font-bold text-stone-400 uppercase tracking-widest">
               Sistem
             </div>
@@ -317,6 +354,7 @@ interface TopHeaderProps {
   onOpenMobileMenu: () => void;
   onTriggerLogout: () => void;
   onOpenSettings?: () => void;
+  onOpenDriveSync?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -326,6 +364,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenMobileMenu,
   onTriggerLogout,
   onOpenSettings,
+  onOpenDriveSync,
 }) => {
   const getTabTitle = (tab: NavTab) => {
     switch (tab) {
@@ -380,8 +419,21 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </div>
           </div>
 
-          {/* Right: Nama Pengguna & Tombol Logout (Sesuai Permintaan) */}
+          {/* Right: Nama Pengguna & Tombol Logout & Sync Drive */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Google Drive Sync Quick Button */}
+            {onOpenDriveSync && (
+              <button
+                type="button"
+                onClick={onOpenDriveSync}
+                className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 active:scale-95 text-amber-300 hover:text-amber-200 border border-amber-500/40 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                title="Sinkronisasi Google Drive (Backup & Restore)"
+              >
+                <Cloud className="w-4 h-4 text-amber-400" />
+                <span className="hidden md:inline font-bold">Sinkronisasi Drive</span>
+              </button>
+            )}
+
             {/* User Session Info (Nama) */}
             {currentUser && (
               <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-stone-800/90 border border-stone-700 shadow-inner">
@@ -414,7 +466,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="hidden md:flex p-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white transition-colors border border-stone-700"
+                className="hidden md:flex p-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white transition-colors border border-stone-700 cursor-pointer"
                 title="Pengaturan Kwartir & Data"
               >
                 <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -425,7 +477,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <button
               type="button"
               onClick={onTriggerLogout}
-              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all shadow-md shadow-rose-600/20 border border-rose-500"
+              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all shadow-md shadow-rose-600/20 border border-rose-500 cursor-pointer"
               title="Keluar dari Aplikasi (Logout)"
             >
               <LogOut className="w-4 h-4" />
@@ -445,6 +497,7 @@ export interface NavbarProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   onOpenSettings: () => void;
+  onOpenDriveSync?: () => void;
   settings: AppSettings;
   pesertaCount: number;
   sudahDinilaiCount: number;
@@ -465,6 +518,7 @@ export const Navbar: React.FC<NavbarProps> = (props) => {
         sudahDinilaiCount={props.sudahDinilaiCount}
         currentUser={props.currentUser}
         onOpenSettings={props.onOpenSettings}
+        onOpenDriveSync={props.onOpenDriveSync}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
       />
@@ -475,6 +529,7 @@ export const Navbar: React.FC<NavbarProps> = (props) => {
         onOpenMobileMenu={() => setMobileMenuOpen(true)}
         onTriggerLogout={props.onTriggerLogout}
         onOpenSettings={props.onOpenSettings}
+        onOpenDriveSync={props.onOpenDriveSync}
       />
     </>
   );

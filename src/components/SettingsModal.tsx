@@ -13,6 +13,7 @@ import {
   Trash2,
   HelpCircle,
   Eye,
+  Cloud,
 } from 'lucide-react';
 import { PramukaBadge } from './PramukaBadge';
 import { KopSurat, DefaultCikalLogo, DefaultWosmLogo } from './KopSurat';
@@ -22,6 +23,7 @@ interface SettingsModalProps {
   onSaveSettings: (settings: AppSettings) => void;
   onResetDefault: () => void;
   onClose: () => void;
+  onOpenDriveSync?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -29,6 +31,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveSettings,
   onResetDefault,
   onClose,
+  onOpenDriveSync,
 }) => {
   // General event settings
   const [kwartirCabang, setKwartirCabang] = useState(settings.kwartirCabang);
@@ -540,6 +543,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Download className="w-3.5 h-3.5" />
                     <span>Unduh Cadangan JSON</span>
                   </button>
+
+                  {onOpenDriveSync && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenDriveSync();
+                      }}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                    >
+                      <Cloud className="w-3.5 h-3.5" />
+                      <span>Sinkronisasi Google Drive</span>
+                    </button>
+                  )}
 
                   {!showResetConfirm ? (
                     <button

@@ -35,6 +35,7 @@ import { RekapitulasiView } from './components/RekapitulasiView';
 import { LembarPenilaianPrint } from './components/LembarPenilaianPrint';
 import { SettingsModal } from './components/SettingsModal';
 import { LoginForm } from './components/LoginForm';
+import { DriveSyncModal } from './components/DriveSyncModal';
 import { LogOut, ShieldAlert } from 'lucide-react';
 import { extractGolonganName, getDefaultTKUForGolongan } from './utils/golongan';
 
@@ -60,6 +61,7 @@ export default function App() {
   });
   const [printPesertaId, setPrintPesertaId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDriveSyncOpen, setIsDriveSyncOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -294,6 +296,27 @@ export default function App() {
     }
   };
 
+  const handleApplySyncData = (
+    newPeserta: Peserta[],
+    newPenguji: Penguji[],
+    newKelompok: Kelompok[],
+    newPenilaian: Record<string, PenilaianPeserta>,
+    newSettings?: AppSettings
+  ) => {
+    setPesertaList(newPeserta);
+    setPengujiList(newPenguji);
+    setKelompokList(newKelompok);
+    setPenilaianMap(newPenilaian);
+    if (newSettings) {
+      setSettings(newSettings);
+      saveSettings(newSettings);
+    }
+    savePeserta(newPeserta);
+    savePenguji(newPenguji);
+    saveKelompok(newKelompok);
+    savePenilaian(newPenilaian);
+  };
+
   const handleSyncAllPesertaToSettings = () => {
     const targetGol = extractGolonganName(settings.golongan);
     const targetTku = getDefaultTKUForGolongan(settings.golongan);
@@ -364,6 +387,7 @@ export default function App() {
             setIsSettingsOpen(true);
           }
         }}
+        onOpenDriveSync={() => setIsDriveSyncOpen(true)}
         mobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
       />
@@ -381,6 +405,7 @@ export default function App() {
               setIsSettingsOpen(true);
             }
           }}
+          onOpenDriveSync={() => setIsDriveSyncOpen(true)}
         />
 
         {/* Main Content Area (hidden during print when printPesertaId modal is active) */}
@@ -400,6 +425,7 @@ export default function App() {
             onNavigateToTab={handleSelectTab}
             onNavigateToNilai={handleNavigateToNilai}
             onOpenPrintPreview={handleOpenPrintPreview}
+            onOpenDriveSync={() => setIsDriveSyncOpen(true)}
           />
         )}
 
@@ -536,9 +562,23 @@ export default function App() {
           settings={settings}
           onSaveSettings={handleSaveSettings}
           onResetDefault={handleResetData}
+          onOpenDriveSync={() => setIsDriveSyncOpen(true)}
           onClose={() => setIsSettingsOpen(false)}
         />
       )}
+
+      {/* Google Drive Synchronization Modal (Backup & Restore) */}
+      <DriveSyncModal
+        isOpen={isDriveSyncOpen}
+        onClose={() => setIsDriveSyncOpen(false)}
+        currentUser={currentUser}
+        pesertaList={pesertaList}
+        pengujiList={pengujiList}
+        kelompokList={kelompokList}
+        penilaianMap={penilaianMap}
+        settings={settings}
+        onApplySyncData={handleApplySyncData}
+      />
 
       {/* Top-level Logout Confirmation Modal (Never clipped by header stacking context) */}
       {isLogoutModalOpen && (

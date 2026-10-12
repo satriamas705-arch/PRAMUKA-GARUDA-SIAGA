@@ -13,6 +13,7 @@ import {
   FileEdit,
   ClipboardList,
   Sparkles,
+  Cloud,
 } from 'lucide-react';
 import { PramukaBadge } from './PramukaBadge';
 import { exportRekapitulasiToExcel } from '../utils/exportExcel';
@@ -27,6 +28,7 @@ interface DashboardViewProps {
   onNavigateToTab: (tab: 'dashboard' | 'peserta' | 'penguji' | 'kelompok' | 'penilaian' | 'rekap') => void;
   onNavigateToNilai: (pesertaId: string) => void;
   onOpenPrintPreview: (pesertaId: string) => void;
+  onOpenDriveSync?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -39,6 +41,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToTab,
   onNavigateToNilai,
   onOpenPrintPreview,
+  onOpenDriveSync,
 }) => {
   const isPenguji = currentUser?.role === 'penguji';
   const totalPeserta = pesertaList.length;
@@ -112,6 +115,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span>Ekspor Excel (.xlsx)</span>
                 </button>
               )}
+
+              {onOpenDriveSync && (
+                <button
+                  type="button"
+                  onClick={onOpenDriveSync}
+                  className="px-4 py-2.5 bg-amber-600/40 hover:bg-amber-600/60 active:scale-95 text-amber-200 hover:text-white font-bold text-xs sm:text-sm rounded-xl flex items-center gap-2 backdrop-blur-xs transition-all border border-amber-500/40 cursor-pointer"
+                >
+                  <Cloud className="w-4 h-4 text-amber-400" />
+                  <span>Sinkronisasi Google Drive</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -131,6 +145,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Quick Google Drive Sync Banner */}
+      {onOpenDriveSync && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-white to-amber-50/50 border border-amber-300/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-700 shrink-0">
+              <Cloud className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-sm text-stone-900">
+                  Sinkronisasi Cloud Google Drive
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Merge &amp; Update Aktif
+                </span>
+              </div>
+              <p className="text-xs text-stone-600 mt-0.5">
+                Hubungkan dan selaraskan data penilaian ke folder resmi Kwartir Cabang / Kwarran Kemranjen
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenDriveSync}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs sm:text-sm rounded-xl shadow-sm flex items-center gap-2 transition-all cursor-pointer shrink-0 w-full sm:w-auto justify-center"
+          >
+            <Cloud className="w-4 h-4" />
+            <span>Buka Sinkronisasi Drive</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Metric Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
